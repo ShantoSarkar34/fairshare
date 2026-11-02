@@ -6,3 +6,253 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+// ---------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------
+
+enum GroupRole {
+  ADMIN
+  MEMBER
+}
+
+enum SplitType {
+  EQUAL
+  EXACT
+  PERCENTAGE
+  SHARES
+}
+
+enum PaymentMethod {
+  BKASH
+  CASH
+  BANK
+}
+
+enum ActivityType {
+  GROUP_CREATED
+  MEMBER_JOINED
+  MEMBER_REMOVED
+  MEMBER_LEFT
+  INVITE_REGENERATED
+  EXPENSE_CREATED
+  EXPENSE_UPDATED
+  EXPENSE_DELETED
+  SETTLEMENT_RECORDED
+}
+
+// ---------------------------------------------------------------
+// Better Auth models (shape from Prisma's Better Auth guide).
+// Only change: User has extra relation fields for our own tables.
+// ---------------------------------------------------------------
+
+model User {
+  id            String    @id
+  name          String
+  email         String
+  emailVerified Boolean
+  image         String?
+  createdAt     DateTime
+  updatedAt     DateTime
+  sessions      Session[]
+  accounts      Account[]
+
+  // FairShare relations
+  groupsCreated       Group[]              @relation("GroupCreator")
+  memberships         GroupMember[]
+  invitesCreated      GroupInvite[]
+  expensesPaid        Expense[]            @relation("ExpensePayer")
+  expensesCreated     Expense[]            @relation("ExpenseCreator")
+  expenseShares       ExpenseParticipant[]
+  settlementsPaid     Settlement[]         @relation("SettlementFrom")
+  settlementsReceived Settlement[]         @relation("SettlementTo")
+  settlementsRecorded Settlement[]         @relation("SettlementRecorder")
+  activities          Activity[]
+
+  @@unique([email])
+  @@map("user")
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String
+  createdAt DateTime
+  updatedAt DateTime
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([token])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime
+  updatedAt             DateTime
+
+  @@map("account")
+}
+
+model Verification {
+  id         String    @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime?
+  updatedAt  DateTime?
+
+  @@map("verification")
+}
+
+// ---------------------------------------------------------------
+// FairShare domain models
+// ---------------------------------------------------------------
+
+model Group {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  createdById String
+  createdBy   User     @relation("GroupCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  members     GroupMember[]
+  invites     GroupInvite[]
+  expenses    Expense[]
+  settlements Settlement[]
+  activities  Activity[]
+
+  @@index([createdById])
+  @@map("groups")
+}
+
+model GroupMember {
+  id       String    @id @default(cuid())
+  groupId  String
+  group    Group     @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  role     GroupRole @default(MEMBER)
+  joinedAt DateTime  @default(now())
+  // null = active member. Set when removed or left. The row is kept so
+  // history stays intact; re-joining clears it.
+  leftAt   DateTime?
+
+  @@unique([groupId, userId])
+  @@index([userId])
+  @@map("group_members")
+}
+
+model GroupInvite {
+  id          String    @id @default(cuid())
+  groupId     String
+  group       Group     @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  // SHA-256 hash of the random token. The raw token is never stored.
+  tokenHash   String    @unique
+  createdById String
+  createdBy   User      @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([groupId])
+  @@map("group_invites")
+}
+
+model Expense {
+  id          String    @id @default(cuid())
+  groupId     String
+  group       Group     @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  description String
+  // Integer poisha. 100.00 taka = 10000.
+  amount      BigInt
+  expenseDate DateTime  @db.Date
+  paidById    String
+  paidBy      User      @relation("ExpensePayer", fields: [paidById], references: [id], onDelete: Restrict)
+  createdById String
+  createdBy   User      @relation("ExpenseCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  splitType   SplitType
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  participants ExpenseParticipant[]
+
+  @@index([groupId, expenseDate])
+  @@index([paidById])
+  @@index([createdById])
+  @@map("expenses")
+}
+
+model ExpenseParticipant {
+  id          String  @id @default(cuid())
+  expenseId   String
+  expense     Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User    @relation(fields: [userId], references: [id], onDelete: Restrict)
+  // This person's computed share in integer poisha.
+  shareAmount BigInt
+  // Original input: percentage in basis points (50% = 5000) or share count.
+  // Null for EQUAL and EXACT.
+  splitValue  Int?
+
+  @@unique([expenseId, userId])
+  @@index([userId])
+  @@map("expense_participants")
+}
+
+model Settlement {
+  id          String        @id @default(cuid())
+  groupId     String
+  group       Group         @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  fromUserId  String
+  fromUser    User          @relation("SettlementFrom", fields: [fromUserId], references: [id], onDelete: Restrict)
+  toUserId    String
+  toUser      User          @relation("SettlementTo", fields: [toUserId], references: [id], onDelete: Restrict)
+  // Integer poisha.
+  amount      BigInt
+  method      PaymentMethod
+  note        String?
+  settledAt   DateTime      @default(now())
+  createdById String
+  createdBy   User          @relation("SettlementRecorder", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt   DateTime      @default(now())
+
+  @@index([groupId, settledAt])
+  @@index([fromUserId])
+  @@index([toUserId])
+  @@map("settlements")
+}
+
+model Activity {
+  id         String       @id @default(cuid())
+  groupId    String
+  group      Group        @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  actorId    String
+  actor      User         @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  type       ActivityType
+  // Plain strings, not foreign keys, so history survives deleted records.
+  entityType String?
+  entityId   String?
+  // Before/after snapshots etc. Amounts are stored as strings (BigInt is not JSON-safe).
+  metadata   Json?
+  createdAt  DateTime     @default(now())
+
+  @@index([groupId, createdAt])
+  @@index([actorId])
+  @@map("activities")
+}
