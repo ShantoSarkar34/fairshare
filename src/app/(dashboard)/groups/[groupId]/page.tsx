@@ -2,6 +2,11 @@ import { Receipt } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Suspense } from "react";
+import {
+  BalanceSection,
+  BalanceSectionSkeleton,
+} from "@/components/groups/balance-section";
 import { DeleteGroupSection } from "@/components/groups/delete-group-section";
 import { InvitePanel } from "@/components/groups/invite-panel";
 import { RemoveMemberButton } from "@/components/groups/remove-member-button";
@@ -69,6 +74,10 @@ export default async function GroupPage({
           Expenses
         </Link>
       </div>
+
+      <Suspense fallback={<BalanceSectionSkeleton />}>
+        <BalanceSection groupId={group.id} />
+      </Suspense>
 
       <Card>
         <CardHeader>
