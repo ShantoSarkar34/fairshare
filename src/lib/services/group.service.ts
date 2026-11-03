@@ -1,8 +1,8 @@
 import "server-only";
 
 import { prisma } from "@/lib/db/prisma";
-import { NotFoundError } from "@/lib/errors";
-import { requireMembership } from "@/lib/services/group-access";
+import { ConflictError, NotFoundError, ValidationError } from "@/lib/errors";
+import { requireAdmin, requireMembership } from "@/lib/services/group-access";
 import type { CreateGroupInput } from "@/lib/validations/group";
 
 /**
@@ -109,4 +109,88 @@ export async function getGroupForMember(groupId: string, userId: string) {
       joinedAt: member.joinedAt,
     })),
   };
+}
+
+/**
+ * Admin removes another member. The membership row is kept (leftAt is set),
+ * so past expenses and activity stay intact.
+ */
+export async function removeMember(
+  groupId: string,
+  actorId: string,
+  targetUserId: string,
+) {
+  await requireAdmin(groupId, actorId);
+
+  // Nobody removes themselves. This also guarantees the group keeps an admin.
+  if (targetUserId === actorId) {
+    throw new ValidationError("You cannot remove yourself from the group.");
+  }
+
+  const target = await prisma.groupMember.findFirst({
+    where: { groupId, userId: targetUserId, leftAt: null },
+    select: { id: true, user: { select: { name: true } } },
+  });
+
+  if (!target) {
+    throw new NotFoundError("Member not found in this group.");
+  }
+
+  // ---------------------------------------------------------------
+  // OPEN ITEM (balances phase): a member whose net balance is not zero
+  // must NOT be removable. Add that check HERE before expenses can be
+  // created. Today no expenses exist, so every balance is zero.
+  // ---------------------------------------------------------------
+
+  await prisma.$transaction(async (tx) => {
+    // updateMany with leftAt: null makes a double-click or race a safe no-op.
+    const result = await tx.groupMember.updateMany({
+      where: { id: target.id, leftAt: null },
+      data: { leftAt: new Date() },
+    });
+
+    if (result.count === 0) {
+      throw new ConflictError("This member was already removed.");
+    }
+
+    await tx.activity.create({
+      data: {
+        groupId,
+        actorId,
+        type: "MEMBER_REMOVED",
+        entityType: "member",
+        entityId: targetUserId,
+        // Snapshot the name: the activity must still make sense later.
+        metadata: { name: target.user.name },
+      },
+    });
+  });
+}
+
+/**
+ * Permanently deletes the group and, through cascading foreign keys, its
+ * members, invites, expenses, settlements and activity log.
+ * The caller must be an ADMIN and must type the exact group name.
+ */
+export async function deleteGroup(
+  groupId: string,
+  actorId: string,
+  confirmName: string,
+) {
+  await requireAdmin(groupId, actorId);
+
+  const group = await prisma.group.findUnique({
+    where: { id: groupId },
+    select: { name: true },
+  });
+
+  if (!group) {
+    throw new NotFoundError("Group not found");
+  }
+
+  if (confirmName.trim() !== group.name) {
+    throw new ValidationError("The group name you typed does not match.");
+  }
+
+  await prisma.group.delete({ where: { id: groupId } });
 }

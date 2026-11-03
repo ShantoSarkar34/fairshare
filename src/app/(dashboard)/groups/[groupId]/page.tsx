@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { DeleteGroupSection } from "@/components/groups/delete-group-section";
 import { InvitePanel } from "@/components/groups/invite-panel";
+import { RemoveMemberButton } from "@/components/groups/remove-member-button";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -87,9 +89,19 @@ export default async function GroupPage({
                     </p>
                   </div>
                 </div>
-                <Badge variant="outline">
-                  {member.role === "ADMIN" ? "Admin" : "Member"}
-                </Badge>
+                <div className="flex shrink-0 items-center gap-1">
+                  <Badge variant="outline">
+                    {member.role === "ADMIN" ? "Admin" : "Member"}
+                  </Badge>
+                  {/* UI convenience only. The server action re-checks the role. */}
+                  {isAdmin && member.userId !== user.id && (
+                    <RemoveMemberButton
+                      groupId={group.id}
+                      userId={member.userId}
+                      name={member.name}
+                    />
+                  )}
+                </div>
               </li>
             ))}
           </ul>
@@ -97,12 +109,15 @@ export default async function GroupPage({
       </Card>
 
       {isAdmin && (
-        <InvitePanel
-          groupId={group.id}
-          activeExpiryLabel={
-            inviteSummary ? dateFormat.format(inviteSummary.expiresAt) : null
-          }
-        />
+        <>
+          <InvitePanel
+            groupId={group.id}
+            activeExpiryLabel={
+              inviteSummary ? dateFormat.format(inviteSummary.expiresAt) : null
+            }
+          />
+          <DeleteGroupSection groupId={group.id} groupName={group.name} />
+        </>
       )}
     </div>
   );
