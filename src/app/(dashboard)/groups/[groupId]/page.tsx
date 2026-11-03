@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { InvitePanel } from "@/components/groups/invite-panel";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -11,6 +12,7 @@ import {
 import { requireUser } from "@/lib/auth/session";
 import { NotFoundError } from "@/lib/errors";
 import { getGroupForMember } from "@/lib/services/group.service";
+import { getInviteSummary } from "@/lib/services/invite.service";
 
 export const metadata: Metadata = { title: "Group" };
 
@@ -29,17 +31,22 @@ export default async function GroupPage({
     (error: unknown) => {
       if (error instanceof NotFoundError) notFound();
       throw error;
-    }
+    },
   );
+
+  const isAdmin = group.currentUserRole === "ADMIN";
+
+  // Only admins load invite info (and the service re-checks the role).
+  const inviteSummary = isAdmin
+    ? await getInviteSummary(group.id, user.id)
+    : null;
 
   return (
     <div className="space-y-6">
       <div>
         <div className="flex flex-wrap items-center gap-2">
           <h1 className="text-2xl font-bold">{group.name}</h1>
-          <Badge variant="outline">
-            {group.currentUserRole === "ADMIN" ? "Admin" : "Member"}
-          </Badge>
+          <Badge variant="outline">{isAdmin ? "Admin" : "Member"}</Badge>
         </div>
         {group.description && (
           <p className="mt-1 text-sm text-muted-foreground">
@@ -88,6 +95,15 @@ export default async function GroupPage({
           </ul>
         </CardContent>
       </Card>
+
+      {isAdmin && (
+        <InvitePanel
+          groupId={group.id}
+          activeExpiryLabel={
+            inviteSummary ? dateFormat.format(inviteSummary.expiresAt) : null
+          }
+        />
+      )}
     </div>
   );
 }

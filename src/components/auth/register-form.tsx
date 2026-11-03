@@ -16,7 +16,7 @@ import {
   type RegisterValues,
 } from "@/lib/validations/auth";
 
-export function RegisterForm() {
+export function RegisterForm({ redirectTo }: { redirectTo: string }) {
   const router = useRouter();
   const [serverError, setServerError] = useState<string | null>(null);
 
@@ -46,7 +46,7 @@ export function RegisterForm() {
         return;
       }
 
-      router.push("/dashboard");
+      router.push(redirectTo);
       router.refresh();
     } catch {
       setServerError("Network error. Check your connection and try again.");

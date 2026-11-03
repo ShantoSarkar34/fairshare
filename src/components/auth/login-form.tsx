@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { signIn } from "@/lib/auth/auth-client";
 import { loginSchema, type LoginValues } from "@/lib/validations/auth";
 
-export function LoginForm() {
+export function LoginForm({ redirectTo }: { redirectTo: string }) {
   const router = useRouter();
   const [serverError, setServerError] = useState<string | null>(null);
 
@@ -39,7 +39,7 @@ export function LoginForm() {
         return;
       }
 
-      router.push("/dashboard");
+      router.push(redirectTo);
       router.refresh();
     } catch {
       setServerError("Network error. Check your connection and try again.");

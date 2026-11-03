@@ -8,10 +8,22 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { safeRedirectPath } from "@/lib/auth/redirect";
 
 export const metadata: Metadata = { title: "Create account" };
 
-export default function RegisterPage() {
+export default async function RegisterPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ next?: string | string[] }>;
+}) {
+  const { next } = await searchParams;
+  const redirectTo = safeRedirectPath(typeof next === "string" ? next : null);
+  const loginHref =
+    redirectTo === "/dashboard"
+      ? "/login"
+      : `/login?next=${encodeURIComponent(redirectTo)}`;
+
   return (
     <Card>
       <CardHeader>
@@ -21,11 +33,11 @@ export default function RegisterPage() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <RegisterForm />
+        <RegisterForm redirectTo={redirectTo} />
         <p className="text-center text-sm text-muted-foreground">
           Already have an account?{" "}
           <Link
-            href="/login"
+            href={loginHref}
             className="font-medium text-primary hover:underline"
           >
             Sign in
