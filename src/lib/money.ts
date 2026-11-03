@@ -81,6 +81,24 @@ export function formatPoisha(amount: bigint): string {
 }
 
 /**
+ * Converts poisha to a plain decimal taka string without a symbol or grouping.
+ * This is the safe wire format for BigInt amounts: "120000" poisha becomes
+ * "1200.00", which can be sent through JSON and parsed again exactly.
+ */
+export function poishaToDecimalString(amount: bigint): string {
+  if (typeof amount !== "bigint") {
+    throw new TypeError("Money amount must be a bigint");
+  }
+
+  const isNegative = amount < 0n;
+  const absolute = isNegative ? -amount : amount;
+  const taka = absolute / POISHA_PER_TAKA;
+  const poisha = absolute % POISHA_PER_TAKA;
+
+  return `${isNegative ? "-" : ""}${taka}.${poisha.toString().padStart(2, "0")}`;
+}
+
+/**
  * Sums poisha exactly. Useful for checks such as "do split amounts equal the
  * expense total?".
  */

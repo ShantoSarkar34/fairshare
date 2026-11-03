@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatPoisha,
   parseMoneyToPoisha,
+  poishaToDecimalString,
   sumPoisha,
 } from "./money";
 
@@ -83,6 +84,34 @@ describe("formatPoisha", () => {
 
   it("rejects a non-bigint runtime value", () => {
     expect(() => formatPoisha(100 as unknown as bigint)).toThrow(TypeError);
+  });
+});
+
+describe("poishaToDecimalString", () => {
+  const cases: Array<[input: bigint, expected: string]> = [
+    [0n, "0.00"],
+    [1n, "0.01"],
+    [100n, "1.00"],
+    [10050n, "100.50"],
+    [120000n, "1200.00"],
+    [9999999999999999999999n, "99999999999999999999.99"],
+    [-100000n, "-1000.00"],
+  ];
+
+  it.each(cases)("serializes %s as %s", (input, expected) => {
+    expect(poishaToDecimalString(input)).toBe(expected);
+  });
+
+  it("round-trips through the parser exactly", () => {
+    const poisha = 9999999999999999999999n;
+
+    expect(parseMoneyToPoisha(poishaToDecimalString(poisha))).toBe(poisha);
+  });
+
+  it("rejects a non-bigint runtime value", () => {
+    expect(() =>
+      poishaToDecimalString(100 as unknown as bigint),
+    ).toThrow(TypeError);
   });
 });
 

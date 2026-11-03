@@ -1,9 +1,12 @@
+import { Receipt } from "lucide-react";
 import type { Metadata } from "next";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { DeleteGroupSection } from "@/components/groups/delete-group-section";
 import { InvitePanel } from "@/components/groups/invite-panel";
 import { RemoveMemberButton } from "@/components/groups/remove-member-button";
 import { Badge } from "@/components/ui/badge";
+import { buttonVariants } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -45,16 +48,26 @@ export default async function GroupPage({
 
   return (
     <div className="space-y-6">
-      <div>
-        <div className="flex flex-wrap items-center gap-2">
-          <h1 className="text-2xl font-bold">{group.name}</h1>
-          <Badge variant="outline">{isAdmin ? "Admin" : "Member"}</Badge>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-2xl font-bold">{group.name}</h1>
+            <Badge variant="outline">{isAdmin ? "Admin" : "Member"}</Badge>
+          </div>
+          {group.description && (
+            <p className="mt-1 text-sm text-muted-foreground">
+              {group.description}
+            </p>
+          )}
         </div>
-        {group.description && (
-          <p className="mt-1 text-sm text-muted-foreground">
-            {group.description}
-          </p>
-        )}
+
+        <Link
+          href={`/groups/${group.id}/expenses`}
+          className={buttonVariants({ variant: "outline", size: "sm" })}
+        >
+          <Receipt />
+          Expenses
+        </Link>
       </div>
 
       <Card>
