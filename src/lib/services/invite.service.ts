@@ -3,6 +3,7 @@ import "server-only";
 import { createHash, randomBytes } from "node:crypto";
 import { prisma } from "@/lib/db/prisma";
 import { ConflictError, NotFoundError } from "@/lib/errors";
+import { recordActivity } from "@/lib/services/activity.service";
 import { getActiveMembership, requireAdmin } from "@/lib/services/group-access";
 
 export const INVITE_TTL_DAYS = 7;
@@ -38,26 +39,26 @@ export async function createInvite(groupId: string, userId: string) {
       data: { revokedAt: new Date() },
     });
 
-    await tx.groupInvite.create({
+    const invite = await tx.groupInvite.create({
       data: {
         groupId,
         tokenHash: hashToken(token),
         createdById: userId,
         expiresAt,
       },
+      select: { id: true },
     });
 
-    if (revoked.count > 0) {
-      await tx.activity.create({
-        data: {
-          groupId,
-          actorId: userId,
-          type: "INVITE_REGENERATED",
-          entityType: "group",
-          entityId: groupId,
-        },
-      });
-    }
+    // Exactly one activity per create operation. A regeneration is represented
+    // by its own action instead of logging both "created" and "regenerated".
+    await recordActivity(tx, {
+      groupId,
+      actorId: userId,
+      action: revoked.count > 0 ? "INVITE_REGENERATED" : "INVITE_CREATED",
+      entityType: "invite",
+      entityId: invite.id,
+      metadata: { expiresAt: expiresAt.toISOString() },
+    });
   });
 
   return { token, expiresAt };
@@ -150,14 +151,23 @@ export async function acceptInvite(token: string, userId: string) {
         });
       }
 
-      await tx.activity.create({
-        data: {
-          groupId,
-          actorId: userId,
-          type: "MEMBER_JOINED",
-          entityType: "member",
-          entityId: userId,
-          metadata: { viaInvite: true },
+      const user = await tx.user.findUnique({
+        where: { id: userId },
+        select: { name: true },
+      });
+
+      // One event for the join: the invitation was accepted and the member
+      // joined. Snapshot the name and whether this re-activated an old row.
+      await recordActivity(tx, {
+        groupId,
+        actorId: userId,
+        action: "INVITE_ACCEPTED",
+        entityType: "member",
+        entityId: userId,
+        metadata: {
+          name: user?.name ?? "Member",
+          viaInvite: true,
+          rejoined: existing !== null,
         },
       });
     });

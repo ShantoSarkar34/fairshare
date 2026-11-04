@@ -2,6 +2,7 @@ import "server-only";
 
 import { prisma } from "@/lib/db/prisma";
 import { ConflictError, NotFoundError, ValidationError } from "@/lib/errors";
+import { recordActivity } from "@/lib/services/activity.service";
 import { requireAdmin, requireMembership } from "@/lib/services/group-access";
 import type { CreateGroupInput } from "@/lib/validations/group";
 
@@ -21,15 +22,13 @@ export async function createGroup(userId: string, input: CreateGroupInput) {
       select: { id: true },
     });
 
-    await tx.activity.create({
-      data: {
-        groupId: group.id,
-        actorId: userId,
-        type: "GROUP_CREATED",
-        entityType: "group",
-        entityId: group.id,
-        metadata: { name: input.name },
-      },
+    await recordActivity(tx, {
+      groupId: group.id,
+      actorId: userId,
+      action: "GROUP_CREATED",
+      entityType: "group",
+      entityId: group.id,
+      metadata: { name: input.name },
     });
 
     return group;
@@ -153,16 +152,14 @@ export async function removeMember(
       throw new ConflictError("This member was already removed.");
     }
 
-    await tx.activity.create({
-      data: {
-        groupId,
-        actorId,
-        type: "MEMBER_REMOVED",
-        entityType: "member",
-        entityId: targetUserId,
-        // Snapshot the name: the activity must still make sense later.
-        metadata: { name: target.user.name },
-      },
+    await recordActivity(tx, {
+      groupId,
+      actorId,
+      action: "MEMBER_REMOVED",
+      entityType: "member",
+      entityId: targetUserId,
+      // Snapshot the name: the activity must still make sense later.
+      metadata: { name: target.user.name },
     });
   });
 }

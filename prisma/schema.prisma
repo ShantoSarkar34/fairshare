@@ -43,7 +43,9 @@ enum ActivityType {
   MEMBER_JOINED
   MEMBER_REMOVED
   MEMBER_LEFT
+  INVITE_CREATED
   INVITE_REGENERATED
+  INVITE_ACCEPTED
   EXPENSE_CREATED
   EXPENSE_UPDATED
   EXPENSE_DELETED
@@ -286,8 +288,11 @@ model Activity {
   id         String       @id @default(cuid())
   groupId    String
   group      Group        @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  actorId    String
-  actor      User         @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  // Nullable for future system-generated events. Historical rows keep their
+  // actor; if a user is ever deleted, the activity survives with actorId null.
+  actorId    String?
+  actor      User?        @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  // `type` is the activity action (GROUP_CREATED, EXPENSE_UPDATED, ...).
   type       ActivityType
   // Plain strings, not foreign keys, so history survives deleted records.
   entityType String?
@@ -298,5 +303,6 @@ model Activity {
 
   @@index([groupId, createdAt])
   @@index([actorId])
+  @@index([entityType, entityId])
   @@map("activities")
 }

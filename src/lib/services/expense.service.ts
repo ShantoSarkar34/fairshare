@@ -8,6 +8,7 @@ import type {
 } from "@/lib/expenses/types";
 import { ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
 import { poishaToDecimalString, sumPoisha } from "@/lib/money";
+import { recordActivity } from "@/lib/services/activity.service";
 import { requireMembership } from "@/lib/services/group-access";
 import {
   splitEqual,
@@ -26,6 +27,69 @@ type ParticipantCreate = {
   shareAmount: bigint;
   splitValue: number | null;
 };
+
+type ExpenseSnapshotSource = {
+  description: string;
+  amount: bigint;
+  expenseDate: Date;
+  paidById: string;
+  splitType: string;
+  paidBy: { name: string };
+  participants: Array<{
+    userId: string;
+    shareAmount: bigint;
+    splitValue: number | null;
+    user: { name: string };
+  }>;
+};
+
+/**
+ * A JSON-safe historical snapshot. BigInt and Date values are converted to
+ * strings before they reach the Activity.metadata JSON column.
+ */
+function toExpenseSnapshot(
+  source: ExpenseSnapshotSource,
+): Record<string, unknown> {
+  return {
+    description: source.description,
+    amount: poishaToDecimalString(source.amount),
+    expenseDate: toDateOnly(source.expenseDate),
+    paidById: source.paidById,
+    paidByName: source.paidBy.name,
+    splitType: source.splitType,
+    participants: source.participants
+      .map((participant) => ({
+        userId: participant.userId,
+        name: participant.user.name,
+        shareAmount: poishaToDecimalString(participant.shareAmount),
+        splitValue: participant.splitValue,
+      }))
+      .sort((a, b) => a.userId.localeCompare(b.userId)),
+  };
+}
+
+function toInputSnapshot(
+  input: CreateExpenseInput,
+  participants: ParticipantCreate[],
+  names: Map<string, string>,
+): Record<string, unknown> {
+  return {
+    description: input.description,
+    amount: poishaToDecimalString(input.amount),
+    expenseDate: toDateOnly(input.expenseDate),
+    paidById: input.paidById,
+    paidByName: names.get(input.paidById) ?? input.paidById,
+    splitType: input.splitType,
+    participants: participants
+      .map((participant) => ({
+        userId: participant.userId,
+        name: names.get(participant.userId) ?? participant.userId,
+        shareAmount: poishaToDecimalString(participant.shareAmount),
+        splitValue: participant.splitValue,
+      }))
+      .sort((a, b) => a.userId.localeCompare(b.userId)),
+  };
+}
 
 /**
  * Reuses Phase 9's split functions. Any validation error from a split function
@@ -123,7 +187,7 @@ function buildParticipantCreates(
 async function assertActiveGroupMembers(
   groupId: string,
   userIds: readonly string[],
-): Promise<void> {
+): Promise<Map<string, string>> {
   const uniqueUserIds = [...new Set(userIds)];
 
   const members = await prisma.groupMember.findMany({
@@ -132,7 +196,10 @@ async function assertActiveGroupMembers(
       userId: { in: uniqueUserIds },
       leftAt: null,
     },
-    select: { userId: true },
+    select: {
+      userId: true,
+      user: { select: { name: true } },
+    },
   });
 
   if (members.length !== uniqueUserIds.length) {
@@ -140,6 +207,15 @@ async function assertActiveGroupMembers(
       "The payer and all participants must be active members of this group",
     );
   }
+
+  // Used only for activity snapshots, so names remain readable if a user or
+  // membership is removed later.
+  return new Map(
+    members.map((member) => [
+      member.userId,
+      member.user?.name ?? member.userId,
+    ]),
+  );
 }
 
 function canManageExpense(
@@ -162,26 +238,40 @@ export async function createExpense(
 ) {
   await requireMembership(groupId, actorId);
 
-  await assertActiveGroupMembers(groupId, [
+  const names = await assertActiveGroupMembers(groupId, [
     input.paidById,
     ...input.participants.map((participant) => participant.userId),
   ]);
 
   const participants = buildParticipantCreates(input);
+  const snapshot = toInputSnapshot(input, participants, names);
 
-  return prisma.expense.create({
-    data: {
+  return prisma.$transaction(async (tx) => {
+    const expense = await tx.expense.create({
+      data: {
+        groupId,
+        description: input.description,
+        amount: input.amount,
+        expenseDate: input.expenseDate,
+        paidById: input.paidById,
+        // The creator always comes from the session, never from client input.
+        createdById: actorId,
+        splitType: input.splitType,
+        participants: { create: participants },
+      },
+      select: { id: true },
+    });
+
+    await recordActivity(tx, {
       groupId,
-      description: input.description,
-      amount: input.amount,
-      expenseDate: input.expenseDate,
-      paidById: input.paidById,
-      // The creator always comes from the session, never from client input.
-      createdById: actorId,
-      splitType: input.splitType,
-      participants: { create: participants },
-    },
-    select: { id: true },
+      actorId,
+      action: "EXPENSE_CREATED",
+      entityType: "expense",
+      entityId: expense.id,
+      metadata: { expense: snapshot },
+    });
+
+    return expense;
   });
 }
 
@@ -199,7 +289,25 @@ export async function updateExpense(
 
   const existing = await prisma.expense.findFirst({
     where: { id: expenseId, groupId },
-    select: { id: true, createdById: true },
+    select: {
+      id: true,
+      createdById: true,
+      description: true,
+      amount: true,
+      expenseDate: true,
+      paidById: true,
+      splitType: true,
+      paidBy: { select: { name: true } },
+      participants: {
+        orderBy: { userId: "asc" },
+        select: {
+          userId: true,
+          shareAmount: true,
+          splitValue: true,
+          user: { select: { name: true } },
+        },
+      },
+    },
   });
 
   if (!existing) {
@@ -212,12 +320,14 @@ export async function updateExpense(
     );
   }
 
-  await assertActiveGroupMembers(groupId, [
+  const names = await assertActiveGroupMembers(groupId, [
     input.paidById,
     ...input.participants.map((participant) => participant.userId),
   ]);
 
   const participants = buildParticipantCreates(input);
+  const before = toExpenseSnapshot(existing);
+  const after = toInputSnapshot(input, participants, names);
 
   await prisma.$transaction(async (tx) => {
     await tx.expense.update({
@@ -241,6 +351,15 @@ export async function updateExpense(
         ...participant,
       })),
     });
+
+    await recordActivity(tx, {
+      groupId,
+      actorId,
+      action: "EXPENSE_UPDATED",
+      entityType: "expense",
+      entityId: existing.id,
+      metadata: { before, after },
+    });
   });
 
   return { id: existing.id };
@@ -259,7 +378,25 @@ export async function deleteExpense(
 
   const existing = await prisma.expense.findFirst({
     where: { id: expenseId, groupId },
-    select: { id: true, createdById: true },
+    select: {
+      id: true,
+      createdById: true,
+      description: true,
+      amount: true,
+      expenseDate: true,
+      paidById: true,
+      splitType: true,
+      paidBy: { select: { name: true } },
+      participants: {
+        orderBy: { userId: "asc" },
+        select: {
+          userId: true,
+          shareAmount: true,
+          splitValue: true,
+          user: { select: { name: true } },
+        },
+      },
+    },
   });
 
   if (!existing) {
@@ -272,7 +409,22 @@ export async function deleteExpense(
     );
   }
 
-  await prisma.expense.delete({ where: { id: existing.id } });
+  const snapshot = toExpenseSnapshot(existing);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.expense.delete({ where: { id: existing.id } });
+
+    // The activity keeps a string entityId and a JSON snapshot, so it survives
+    // the deleted Expense row and its cascaded participants.
+    await recordActivity(tx, {
+      groupId,
+      actorId,
+      action: "EXPENSE_DELETED",
+      entityType: "expense",
+      entityId: existing.id,
+      metadata: { expense: snapshot },
+    });
+  });
 }
 
 /** Lists expenses newest first. Non-members receive a 404-like error. */

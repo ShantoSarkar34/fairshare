@@ -20,6 +20,9 @@ const prismaMock = vi.hoisted(() => ({
     findMany: vi.fn(),
     create: vi.fn(),
   },
+  activity: {
+    create: vi.fn(),
+  },
   $queryRaw: vi.fn(),
   $transaction: vi.fn(),
 }));
@@ -163,6 +166,7 @@ function installMocks() {
     },
   );
 
+  prismaMock.activity.create.mockResolvedValue({ id: "activity-1" });
   prismaMock.$queryRaw.mockResolvedValue([]);
   prismaMock.$transaction.mockImplementation(
     async (callback: (tx: typeof prismaMock) => unknown) => callback(prismaMock),
@@ -240,6 +244,16 @@ describe("recordSettlement", () => {
     }
   });
 
+  it("does not create activity when settlement creation fails", async () => {
+    prismaMock.settlement.create.mockRejectedValue(new Error("insert failed"));
+
+    await expect(
+      recordSettlement(GROUP_ID, "nusrat", validInput()),
+    ).rejects.toThrow("insert failed");
+
+    expect(prismaMock.activity.create).not.toHaveBeenCalled();
+  });
+
   it("rejects a member who is neither sender, receiver, nor admin", async () => {
     setupLedger({
       members: [member("rafi"), member("nusrat"), member("karim")],
@@ -280,6 +294,32 @@ describe("recordSettlement", () => {
     expect(call.data.method).toBe("BKASH");
     expect(call.data.transactionReference).toBe("TRX123");
     expect(state.settlements).toHaveLength(1);
+
+    expect(prismaMock.activity.create).toHaveBeenCalledOnce();
+    const activity = prismaMock.activity.create.mock.calls[0]?.[0] as {
+      data: {
+        actorId: string | null;
+        type: string;
+        entityType: string | null;
+        entityId: string | null;
+        metadata: Record<string, unknown>;
+      };
+    };
+    expect(activity.data.actorId).toBe("nusrat");
+    expect(activity.data.type).toBe("SETTLEMENT_RECORDED");
+    expect(activity.data.entityType).toBe("settlement");
+    expect(activity.data.entityId).toBe("settlement-1");
+    expect(activity.data.metadata).toMatchObject({
+      settlementId: "settlement-1",
+      fromUserId: "nusrat",
+      fromName: "NUSRAT",
+      toUserId: "rafi",
+      toName: "RAFI",
+      amount: "100.00",
+      method: "BKASH",
+      transactionReference: "TRX123",
+    });
+    expect(activity.data.metadata).not.toHaveProperty("note");
   });
 
   it("allows an admin to record a payment between two other members", async () => {

@@ -4,6 +4,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import {
+  ActivitySection,
+  ActivitySectionSkeleton,
+} from "@/components/activity/activity-section";
+import {
   BkashSandboxSection,
   BkashSandboxSectionSkeleton,
 } from "@/components/bkash/bkash-sandbox-section";
@@ -145,6 +149,10 @@ export default async function GroupPage({
           </ul>
         </CardContent>
       </Card>
+
+      <Suspense fallback={<ActivitySectionSkeleton />}>
+        <ActivitySection groupId={group.id} />
+      </Suspense>
 
       {isAdmin && (
         <>

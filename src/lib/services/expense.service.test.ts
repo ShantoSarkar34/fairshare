@@ -31,6 +31,9 @@ const prismaMock = vi.hoisted(() => ({
     deleteMany: vi.fn(),
     updateMany: vi.fn(),
   },
+  activity: {
+    create: vi.fn(),
+  },
   $transaction: vi.fn(),
 }));
 
@@ -109,7 +112,10 @@ function mockMembership(role: "ADMIN" | "MEMBER" = "MEMBER") {
 
 function mockActiveMembers(userIds: string[]) {
   prismaMock.groupMember.findMany.mockResolvedValue(
-    userIds.map((userId) => ({ userId })),
+    userIds.map((userId) => ({
+      userId,
+      user: { name: userId.toUpperCase() },
+    })),
   );
 }
 
@@ -142,6 +148,7 @@ function allocationsByUser(participants: ParticipantCreate[]) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  prismaMock.activity.create.mockResolvedValue({ id: "activity_1" });
   prismaMock.$transaction.mockImplementation((callback: unknown) => {
     if (typeof callback !== "function") {
       throw new TypeError("Expected a transaction callback");
@@ -149,6 +156,24 @@ beforeEach(() => {
     return callback(prismaMock);
   });
 });
+
+function createdActivity() {
+  const call = prismaMock.activity.create.mock.calls[0]?.[0] as
+    | {
+        data: {
+          groupId: string;
+          actorId: string | null;
+          type: string;
+          entityType: string | null;
+          entityId: string | null;
+          metadata?: Record<string, unknown>;
+        };
+      }
+    | undefined;
+
+  if (!call) throw new Error("activity.create was not called");
+  return call.data;
+}
 
 describe("createExpense", () => {
   it("stores the session actor as creator and uses splitEqual", async () => {
@@ -186,6 +211,43 @@ describe("createExpense", () => {
     expect(allocations.get("rafi")).toBe(40_000n);
     expect(allocations.get("nusrat")).toBe(40_000n);
     expect(allocations.get("karim")).toBe(40_000n);
+  });
+
+  it("logs one JSON-safe EXPENSE_CREATED activity with the session actor", async () => {
+    mockMembership();
+    mockActiveMembers(["rafi", "nusrat", "karim"]);
+    mockExpenseCreate();
+
+    await createExpense(GROUP_ID, ACTOR_ID, equalInput);
+
+    expect(prismaMock.activity.create).toHaveBeenCalledOnce();
+    const activity = createdActivity();
+
+    expect(activity.groupId).toBe(GROUP_ID);
+    expect(activity.actorId).toBe(ACTOR_ID);
+    expect(activity.type).toBe("EXPENSE_CREATED");
+    expect(activity.entityType).toBe("expense");
+    expect(activity.entityId).toBe(EXPENSE_ID);
+    expect(activity.metadata).toMatchObject({
+      expense: {
+        description: "Dinner",
+        amount: "1200.00",
+        paidByName: "RAFI",
+        splitType: "EQUAL",
+      },
+    });
+  });
+
+  it("does not create activity when expense creation fails", async () => {
+    mockMembership();
+    mockActiveMembers(["rafi", "nusrat", "karim"]);
+    prismaMock.expense.create.mockRejectedValue(new Error("insert failed"));
+
+    await expect(
+      createExpense(GROUP_ID, ACTOR_ID, equalInput),
+    ).rejects.toThrow("insert failed");
+
+    expect(prismaMock.activity.create).not.toHaveBeenCalled();
   });
 
   it("uses splitExact and preserves exact amounts", async () => {
@@ -338,6 +400,32 @@ describe("updateExpense", () => {
     prismaMock.expense.findFirst.mockResolvedValue({
       id: EXPENSE_ID,
       createdById,
+      description: "Dinner",
+      amount: 120_000n,
+      expenseDate: new Date(Date.UTC(2026, 10, 3)),
+      paidById: "rafi",
+      splitType: "EQUAL",
+      paidBy: { name: "RAFI" },
+      participants: [
+        {
+          userId: "rafi",
+          shareAmount: 40_000n,
+          splitValue: null,
+          user: { name: "RAFI" },
+        },
+        {
+          userId: "nusrat",
+          shareAmount: 40_000n,
+          splitValue: null,
+          user: { name: "NUSRAT" },
+        },
+        {
+          userId: "karim",
+          shareAmount: 40_000n,
+          splitValue: null,
+          user: { name: "KARIM" },
+        },
+      ],
     });
     prismaMock.expense.update.mockResolvedValue({ id: EXPENSE_ID });
     prismaMock.expenseParticipant.deleteMany.mockResolvedValue({ count: 3 });
@@ -375,6 +463,27 @@ describe("updateExpense", () => {
     expect(prismaMock.settlement.delete).not.toHaveBeenCalled();
     expect(prismaMock.settlement.deleteMany).not.toHaveBeenCalled();
     expect(prismaMock.settlement.updateMany).not.toHaveBeenCalled();
+
+    expect(prismaMock.activity.create).toHaveBeenCalledOnce();
+    const activity = createdActivity();
+    expect(activity.type).toBe("EXPENSE_UPDATED");
+    expect(activity.entityId).toBe(EXPENSE_ID);
+    expect(activity.actorId).toBe(CREATOR_ID);
+
+    const metadata = activity.metadata as {
+      before: { amount: string; description: string; splitType: string };
+      after: { amount: string; description: string; splitType: string };
+    };
+    expect(metadata.before).toMatchObject({
+      description: "Dinner",
+      amount: "1200.00",
+      splitType: "EQUAL",
+    });
+    expect(metadata.after).toMatchObject({
+      description: "Hotel",
+      amount: "1000.00",
+      splitType: "PERCENTAGE",
+    });
 
     const createManyCall = prismaMock.expenseParticipant.createMany.mock
       .calls[0]?.[0] as {
@@ -426,6 +535,19 @@ describe("updateExpense", () => {
     expect(prismaMock.expense.update).not.toHaveBeenCalled();
   });
 
+  it("does not create activity when the update fails", async () => {
+    mockMembership("MEMBER");
+    mockExistingExpense(CREATOR_ID);
+    mockActiveMembers(["rafi", "nusrat", "karim"]);
+    prismaMock.expense.update.mockRejectedValue(new Error("update failed"));
+
+    await expect(
+      updateExpense(GROUP_ID, CREATOR_ID, EXPENSE_ID, equalInput),
+    ).rejects.toThrow("update failed");
+
+    expect(prismaMock.activity.create).not.toHaveBeenCalled();
+  });
+
   it("recalculates exact splits on update", async () => {
     mockMembership("MEMBER");
     mockExistingExpense(CREATOR_ID);
@@ -450,11 +572,37 @@ describe("deleteExpense", () => {
     prismaMock.expense.findFirst.mockResolvedValue({
       id: EXPENSE_ID,
       createdById,
+      description: "Dinner",
+      amount: 120_000n,
+      expenseDate: new Date(Date.UTC(2026, 10, 3)),
+      paidById: "rafi",
+      splitType: "EQUAL",
+      paidBy: { name: "RAFI" },
+      participants: [
+        {
+          userId: "rafi",
+          shareAmount: 40_000n,
+          splitValue: null,
+          user: { name: "RAFI" },
+        },
+        {
+          userId: "nusrat",
+          shareAmount: 40_000n,
+          splitValue: null,
+          user: { name: "NUSRAT" },
+        },
+        {
+          userId: "karim",
+          shareAmount: 40_000n,
+          splitValue: null,
+          user: { name: "KARIM" },
+        },
+      ],
     });
     prismaMock.expense.delete.mockResolvedValue({ id: EXPENSE_ID });
   }
 
-  it("lets the creator delete", async () => {
+  it("lets the creator delete and preserves a snapshot in activity", async () => {
     mockMembership("MEMBER");
     mockExistingExpense(CREATOR_ID);
 
@@ -467,6 +615,37 @@ describe("deleteExpense", () => {
     expect(prismaMock.settlement.delete).not.toHaveBeenCalled();
     expect(prismaMock.settlement.deleteMany).not.toHaveBeenCalled();
     expect(prismaMock.settlement.updateMany).not.toHaveBeenCalled();
+
+    expect(prismaMock.activity.create).toHaveBeenCalledOnce();
+    const activity = createdActivity();
+    expect(activity.type).toBe("EXPENSE_DELETED");
+    expect(activity.entityType).toBe("expense");
+    expect(activity.entityId).toBe(EXPENSE_ID);
+    expect(activity.metadata).toMatchObject({
+      expense: {
+        description: "Dinner",
+        amount: "1200.00",
+        expenseDate: "2026-11-03",
+        paidByName: "RAFI",
+        participants: [
+          { userId: "karim", name: "KARIM", shareAmount: "400.00" },
+          { userId: "nusrat", name: "NUSRAT", shareAmount: "400.00" },
+          { userId: "rafi", name: "RAFI", shareAmount: "400.00" },
+        ],
+      },
+    });
+  });
+
+  it("does not create activity when deletion fails", async () => {
+    mockMembership("MEMBER");
+    mockExistingExpense(CREATOR_ID);
+    prismaMock.expense.delete.mockRejectedValue(new Error("delete failed"));
+
+    await expect(
+      deleteExpense(GROUP_ID, CREATOR_ID, EXPENSE_ID),
+    ).rejects.toThrow("delete failed");
+
+    expect(prismaMock.activity.create).not.toHaveBeenCalled();
   });
 
   it("lets a group admin delete another member's expense", async () => {

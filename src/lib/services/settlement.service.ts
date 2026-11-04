@@ -16,6 +16,7 @@ import {
   ValidationError,
 } from "@/lib/errors";
 import { poishaToDecimalString, parseMoneyToPoisha } from "@/lib/money";
+import { recordActivity } from "@/lib/services/activity.service";
 import { getGroupBalances } from "@/lib/services/balance.service";
 import { requireMembership } from "@/lib/services/group-access";
 import { loadGroupLedger } from "@/lib/services/ledger.service";
@@ -278,6 +279,26 @@ export async function recordSettlement(
             settledAt: new Date(),
           },
           select: { id: true },
+        });
+
+        await recordActivity(tx, {
+          groupId,
+          actorId,
+          action: "SETTLEMENT_RECORDED",
+          entityType: "settlement",
+          entityId: settlement.id,
+          metadata: {
+            settlementId: settlement.id,
+            fromUserId: input.fromUserId,
+            fromName: fromBalance.name,
+            toUserId: input.toUserId,
+            toName: toBalance.name,
+            // JSON cannot store BigInt; use the same decimal wire format as
+            // the balance and settlement views.
+            amount: poishaToDecimalString(input.amount),
+            method: input.method,
+            transactionReference: input.transactionReference ?? null,
+          },
         });
 
         return { settlementId: settlement.id };
