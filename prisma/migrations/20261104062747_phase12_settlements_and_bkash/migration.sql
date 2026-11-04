@@ -54,3 +54,13 @@ ALTER TABLE "settlements" ADD CONSTRAINT "settlements_amount_positive" CHECK ("a
 ALTER TABLE "settlements" ADD CONSTRAINT "settlements_distinct_parties" CHECK ("fromUserId" <> "toUserId");
 ALTER TABLE "bkash_payments" ADD CONSTRAINT "bkash_payments_amount_positive" CHECK ("amount" > 0);
 ALTER TABLE "bkash_payments" ADD CONSTRAINT "bkash_payments_currency_bdt" CHECK ("currency" = 'BDT');
+
+-- Domain guards (Prisma does not model CHECK constraints).
+-- The two settlements guards already exist from the init migration, so they are
+-- dropped and re-added. This keeps the file replayable on a fresh database.
+ALTER TABLE "settlements" DROP CONSTRAINT IF EXISTS "settlements_amount_positive";
+ALTER TABLE "settlements" ADD CONSTRAINT "settlements_amount_positive" CHECK ("amount" > 0);
+ALTER TABLE "settlements" DROP CONSTRAINT IF EXISTS "settlements_distinct_parties";
+ALTER TABLE "settlements" ADD CONSTRAINT "settlements_distinct_parties" CHECK ("fromUserId" <> "toUserId");
+ALTER TABLE "bkash_payments" ADD CONSTRAINT "bkash_payments_amount_positive" CHECK ("amount" > 0);
+ALTER TABLE "bkash_payments" ADD CONSTRAINT "bkash_payments_currency_bdt" CHECK ("currency" = 'BDT');
