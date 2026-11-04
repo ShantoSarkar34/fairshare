@@ -203,6 +203,28 @@ describe("bKash checkout API", () => {
     });
   });
 
+  it("accepts the bKash hosted sandbox checkout domain", async () => {
+    await primeToken();
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        statusCode: "0000",
+        paymentID: "payment_2",
+        bkashURL: "https://sandbox.payment.bkash.com/?paymentID=payment_2",
+      }),
+    );
+
+    await expect(
+      createBkashPayment({
+        amount: 10_000n,
+        merchantInvoiceNumber: "FS-2",
+        payerReference: "user_1",
+      }),
+    ).resolves.toEqual({
+      paymentID: "payment_2",
+      bkashURL: "https://sandbox.payment.bkash.com/?paymentID=payment_2",
+    });
+  });
+
   it("rejects a failed create response", async () => {
     await primeToken();
     fetchMock.mockResolvedValueOnce(

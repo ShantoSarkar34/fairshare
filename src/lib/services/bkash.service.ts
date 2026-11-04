@@ -7,6 +7,7 @@ import { poishaToDecimalString } from "@/lib/money";
 
 const SANDBOX_HOST = "tokenized.sandbox.bka.sh";
 const SANDBOX_PATH_PREFIX = "/v1.2.0-beta";
+const SANDBOX_CHECKOUT_HOSTS = new Set(["sandbox.payment.bkash.com"]);
 const REQUEST_TIMEOUT_MS = 30_000;
 const TOKEN_EXPIRY_BUFFER_MS = 60_000;
 
@@ -322,10 +323,18 @@ function toTransactionResult(data: ApiResponse): BkashTransactionResult {
 function hasSandboxHost(value: string): boolean {
   try {
     const url = new URL(value);
+
+    if (url.protocol !== "https:") {
+      return false;
+    }
+
+    // bKash currently serves hosted sandbox checkout from this domain.
+    if (SANDBOX_CHECKOUT_HOSTS.has(url.hostname)) {
+      return true;
+    }
+
     return (
-      url.protocol === "https:" &&
-      url.hostname.endsWith(".bka.sh") &&
-      url.hostname.includes("sandbox")
+      url.hostname.endsWith(".bka.sh") && url.hostname.includes("sandbox")
     );
   } catch {
     return false;
