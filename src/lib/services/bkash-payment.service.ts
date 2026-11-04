@@ -10,6 +10,7 @@ import type {
   BkashPaymentView,
   BkashSandboxResult,
 } from "@/lib/bkash/types";
+import { acquireAdvisoryLock } from "@/lib/db/advisory-lock";
 import { prisma } from "@/lib/db/prisma";
 import {
   ConflictError,
@@ -342,7 +343,7 @@ export async function reconcileBkashPayment(
 
   return prisma.$transaction(
     async (tx) => {
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${paymentId})::bigint)`;
+      await acquireAdvisoryLock(tx, paymentId);
 
       const payment = await tx.bkashPayment.findUnique({
         where: { id: paymentId },

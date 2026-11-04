@@ -8,6 +8,7 @@ import {
   calculateSettlements,
   SettlementCalculationError,
 } from "@/lib/calculations/settlement";
+import { acquireAdvisoryLock } from "@/lib/db/advisory-lock";
 import { prisma } from "@/lib/db/prisma";
 import {
   ConflictError,
@@ -200,7 +201,7 @@ export async function recordSettlement(
       async (tx) => {
         // The advisory lock is scoped to this group and released when the
         // transaction finishes. Recalculation happens after acquiring it.
-        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${groupId})::bigint)`;
+        await acquireAdvisoryLock(tx, groupId);
 
         const currentActor = await tx.groupMember.findFirst({
           where: { groupId, userId: actorId, leftAt: null },
