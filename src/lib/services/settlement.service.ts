@@ -15,7 +15,10 @@ import {
   NotFoundError,
   ValidationError,
 } from "@/lib/errors";
-import { poishaToDecimalString, parseMoneyToPoisha } from "@/lib/money";
+import {
+  parseSignedMoneyToPoisha,
+  poishaToDecimalString,
+} from "@/lib/money";
 import { recordActivity } from "@/lib/services/activity.service";
 import { getGroupBalances } from "@/lib/services/balance.service";
 import { requireMembership } from "@/lib/services/group-access";
@@ -80,7 +83,7 @@ export async function getSettlementOverview(
     const suggestions = calculateSettlements(
       balances.data.members.map((member) => ({
         userId: member.userId,
-        net: parseMoneyToPoisha(member.net),
+        net: parseSignedMoneyToPoisha(member.net),
       })),
     ).map((transfer) => ({
       fromUserId: transfer.fromUserId,

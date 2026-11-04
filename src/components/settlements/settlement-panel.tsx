@@ -10,7 +10,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { FieldErrors } from "@/lib/actions/result";
-import { formatPoisha, parseMoneyToPoisha } from "@/lib/money";
+import {
+  formatPoisha,
+  parseMoneyToPoisha,
+  parseSignedMoneyToPoisha,
+} from "@/lib/money";
 import { SETTLEMENT_METHOD_LABELS } from "@/lib/settlements/display";
 import type {
   SettlementHistoryItem,
@@ -32,20 +36,20 @@ export function SettlementPanel({
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
   const debtors = useMemo(
-    () => data.members.filter((member) => parseMoneyToPoisha(member.net) < 0n),
+    () => data.members.filter((member) => parseSignedMoneyToPoisha(member.net) < 0n),
     [data.members],
   );
   const creditors = useMemo(
-    () => data.members.filter((member) => parseMoneyToPoisha(member.net) > 0n),
+    () => data.members.filter((member) => parseSignedMoneyToPoisha(member.net) > 0n),
     [data.members],
   );
   const currentMember = data.members.find(
     (member) => member.userId === data.currentUserId,
   );
   const currentIsDebtor =
-    currentMember !== undefined && parseMoneyToPoisha(currentMember.net) < 0n;
+    currentMember !== undefined && parseSignedMoneyToPoisha(currentMember.net) < 0n;
   const currentIsCreditor =
-    currentMember !== undefined && parseMoneyToPoisha(currentMember.net) > 0n;
+    currentMember !== undefined && parseSignedMoneyToPoisha(currentMember.net) > 0n;
   const isAdmin = data.currentUserRole === "ADMIN";
   const allowedFrom = isAdmin
     ? debtors

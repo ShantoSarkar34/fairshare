@@ -14,7 +14,11 @@ import type {
 } from "@/lib/balances/types";
 import { NotFoundError } from "@/lib/errors";
 import { formatExpenseDate } from "@/lib/expenses/display";
-import { formatPoisha, parseMoneyToPoisha } from "@/lib/money";
+import {
+  formatPoisha,
+  parseMoneyToPoisha,
+  parseSignedMoneyToPoisha,
+} from "@/lib/money";
 import { getGroupBalances } from "@/lib/services/balance.service";
 import { SETTLEMENT_METHOD_LABELS } from "@/lib/settlements/display";
 import type { SettlementMethod } from "@/lib/settlements/types";
@@ -153,7 +157,7 @@ function MemberBalanceRow({
   const share = parseMoneyToPoisha(member.share);
   const settlementsSent = parseMoneyToPoisha(member.settlementsSent);
   const settlementsReceived = parseMoneyToPoisha(member.settlementsReceived);
-  const net = parseMoneyToPoisha(member.net);
+  const net = parseSignedMoneyToPoisha(member.net);
 
   return (
     <li className="py-4 first:pt-0 last:pb-0">
@@ -209,7 +213,7 @@ function MemberBalanceRow({
             ) : (
               <ul className="space-y-3">
                 {member.entries.map((entry) => {
-                  const entryEffect = parseMoneyToPoisha(entry.effect);
+                  const entryEffect = parseSignedMoneyToPoisha(entry.effect);
 
                   return (
                     <li
@@ -253,7 +257,7 @@ function MemberBalanceRow({
             ) : (
               <ul className="space-y-3">
                 {member.settlementEntries.map((entry) => {
-                  const entryEffect = parseMoneyToPoisha(entry.effect);
+                  const entryEffect = parseSignedMoneyToPoisha(entry.effect);
                   const sent = entry.fromUserId === member.userId;
                   const method = formatSettlementMethod(entry.method);
 

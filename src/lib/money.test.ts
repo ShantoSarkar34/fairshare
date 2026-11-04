@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatPoisha,
   parseMoneyToPoisha,
+  parseSignedMoneyToPoisha,
   poishaToDecimalString,
   sumPoisha,
 } from "./money";
@@ -56,6 +57,37 @@ describe("parseMoneyToPoisha", () => {
       parseMoneyToPoisha(100 as unknown as string),
     ).toThrow(TypeError);
   });
+});
+
+describe("parseSignedMoneyToPoisha", () => {
+  const validCases: Array<[input: string, expected: bigint]> = [
+    ["100", 10000n],
+    ["100.5", 10050n],
+    ["0", 0n],
+    ["-100", -10000n],
+    ["-100.5", -10050n],
+    ["-0.01", -1n],
+    [" -1250.75 ", -125075n],
+  ];
+
+  it.each(validCases)("parses signed %s exactly", (input, expected) => {
+    expect(parseSignedMoneyToPoisha(input)).toBe(expected);
+  });
+
+  it("round-trips negative serialized amounts", () => {
+    const amount = -60000n;
+
+    expect(parseSignedMoneyToPoisha(poishaToDecimalString(amount))).toBe(
+      amount,
+    );
+  });
+
+  it.each(["-", "+100", "1e3", "10.999", "1,000.75", ""])(
+    "rejects invalid signed input %s",
+    (input) => {
+      expect(() => parseSignedMoneyToPoisha(input)).toThrow(RangeError);
+    },
+  );
 });
 
 describe("formatPoisha", () => {

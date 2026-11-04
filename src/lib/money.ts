@@ -43,12 +43,46 @@ export function parseMoneyToPoisha(input: string): bigint {
     throw new RangeError("Money amount cannot be negative");
   }
 
+  return parseUnsignedDecimal(trimmed, input);
+}
+
+/**
+ * Parses a signed decimal amount produced by poishaToDecimalString().
+ *
+ * Balance and settlement-effect DTOs can be negative, so display code must not
+ * use the positive-only parser above. User-entered amounts should continue to
+ * use parseMoneyToPoisha() so negative input is rejected.
+ */
+export function parseSignedMoneyToPoisha(input: string): bigint {
+  if (typeof input !== "string") {
+    throw new TypeError("Money amount must be a string");
+  }
+
+  const trimmed = input.trim();
+
+  if (trimmed === "") {
+    throw new RangeError("Money amount is required");
+  }
+
+  if (trimmed.startsWith("-")) {
+    const magnitude = trimmed.slice(1);
+    if (magnitude === "") {
+      throw new RangeError(`Invalid money amount: "${input}"`);
+    }
+
+    return -parseUnsignedDecimal(magnitude, input);
+  }
+
+  return parseUnsignedDecimal(trimmed, input);
+}
+
+function parseUnsignedDecimal(trimmed: string, original: string): bigint {
   if (/^\d+\.\d{3,}$/.test(trimmed)) {
     throw new RangeError("Money amount cannot have more than 2 decimal places");
   }
 
   if (!DECIMAL_AMOUNT_PATTERN.test(trimmed)) {
-    throw new RangeError(`Invalid money amount: "${input}"`);
+    throw new RangeError(`Invalid money amount: "${original}"`);
   }
 
   const [whole, fraction = ""] = trimmed.split(".");
