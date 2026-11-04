@@ -167,6 +167,101 @@ describe("calculateGroupBalances", () => {
     expect(netTotal(result)).toBe(0n);
   });
 
+  it("applies a settlement to reduce a debtor's debt and a creditor's credit", () => {
+    const result = calculateGroupBalances(
+      [rafi, nusrat],
+      [
+        expense({
+          id: "dinner",
+          amount: 30_000n,
+          paidById: "rafi",
+          participants: [
+            { userId: "rafi", shareAmount: 0n },
+            { userId: "nusrat", shareAmount: 30_000n },
+          ],
+        }),
+      ],
+      [
+        {
+          id: "settlement-1",
+          fromUserId: "nusrat",
+          toUserId: "rafi",
+          amount: 30_000n,
+          method: "BKASH",
+          settledAt: "2026-11-04T10:00:00.000Z",
+        },
+      ],
+    );
+
+    expect(balanceFor(result, "rafi")).toMatchObject({
+      paid: 30_000n,
+      share: 0n,
+      settlementsSent: 0n,
+      settlementsReceived: 30_000n,
+      net: 0n,
+      status: "settled",
+    });
+    expect(balanceFor(result, "nusrat")).toMatchObject({
+      paid: 0n,
+      share: 30_000n,
+      settlementsSent: 30_000n,
+      settlementsReceived: 0n,
+      net: 0n,
+      status: "settled",
+    });
+    expect(balanceFor(result, "nusrat").settlementEntries[0]).toMatchObject({
+      settlementId: "settlement-1",
+      amount: 30_000n,
+      effect: 30_000n,
+      method: "BKASH",
+    });
+    expect(balanceFor(result, "rafi").settlementEntries[0]).toMatchObject({
+      settlementId: "settlement-1",
+      effect: -30_000n,
+    });
+    expect(netTotal(result)).toBe(0n);
+  });
+
+  it("combines multiple settlements with expenses", () => {
+    const result = calculateGroupBalances(
+      [rafi, nusrat, karim],
+      [
+        expense({
+          id: "dinner",
+          amount: 90_000n,
+          paidById: "rafi",
+          participants: [
+            { userId: "rafi", shareAmount: 30_000n },
+            { userId: "nusrat", shareAmount: 30_000n },
+            { userId: "karim", shareAmount: 30_000n },
+          ],
+        }),
+      ],
+      [
+        {
+          id: "s1",
+          fromUserId: "nusrat",
+          toUserId: "rafi",
+          amount: 10_000n,
+          method: "CASH",
+        },
+        {
+          id: "s2",
+          fromUserId: "karim",
+          toUserId: "rafi",
+          amount: 20_000n,
+          method: "BANK",
+        },
+      ],
+    );
+
+    expect(balanceFor(result, "rafi").net).toBe(30_000n);
+    expect(balanceFor(result, "nusrat").net).toBe(-20_000n);
+    expect(balanceFor(result, "karim").net).toBe(-10_000n);
+    expect(balanceFor(result, "rafi").settlementEntries).toHaveLength(2);
+    expect(netTotal(result)).toBe(0n);
+  });
+
   it("returns settled zero balances for a group with no expenses", () => {
     const result = calculateGroupBalances([rafi, nusrat, karim], []);
 
@@ -503,6 +598,41 @@ describe("calculateGroupBalances", () => {
           ),
         ).toThrow(BalanceCalculationError);
       }
+    });
+
+    it("rejects invalid settlements", () => {
+      expect(() =>
+        calculateGroupBalances([rafi, nusrat], [], [
+          {
+            id: "same-party",
+            fromUserId: "rafi",
+            toUserId: "rafi",
+            amount: 10_000n,
+          },
+        ]),
+      ).toThrow(BalanceCalculationError);
+
+      expect(() =>
+        calculateGroupBalances([rafi, nusrat], [], [
+          {
+            id: "unknown-party",
+            fromUserId: "rafi",
+            toUserId: "stranger",
+            amount: 10_000n,
+          },
+        ]),
+      ).toThrow(BalanceCalculationError);
+
+      expect(() =>
+        calculateGroupBalances([rafi, nusrat], [], [
+          {
+            id: "bad-amount",
+            fromUserId: "rafi",
+            toUserId: "nusrat",
+            amount: 0n,
+          },
+        ]),
+      ).toThrow(BalanceCalculationError);
     });
   });
 });

@@ -13,15 +13,33 @@ export type BalanceEntryView = {
   effect: string;
 };
 
+export type SettlementBalanceEntryView = {
+  settlementId: string;
+  fromUserId: string;
+  fromName: string;
+  toUserId: string;
+  toName: string;
+  amount: string;
+  settledAt?: string;
+  settledAtLabel?: string;
+  method?: string;
+  note?: string;
+  transactionReference?: string;
+  effect: string;
+};
+
 export type MemberBalanceView = {
   userId: string;
   name: string;
   isActive: boolean;
   paid: string;
   share: string;
+  settlementsSent: string;
+  settlementsReceived: string;
   net: string;
   status: BalanceStatus;
   entries: BalanceEntryView[];
+  settlementEntries: SettlementBalanceEntryView[];
 };
 
 export type GroupBalanceSummary = {

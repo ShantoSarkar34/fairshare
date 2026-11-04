@@ -32,6 +32,18 @@ export type BalanceExpense = {
   participants: readonly BalanceAllocation[];
 };
 
+export type BalanceSettlement = {
+  id: string;
+  fromUserId: string;
+  toUserId: string;
+  amount: bigint;
+  /** Optional display metadata; it does not affect the arithmetic. */
+  settledAt?: string;
+  method?: string;
+  note?: string;
+  transactionReference?: string;
+};
+
 export type BalanceEntry = {
   expenseId: string;
   description: string;
@@ -41,14 +53,30 @@ export type BalanceEntry = {
   effect: bigint;
 };
 
+export type BalanceSettlementEntry = {
+  settlementId: string;
+  fromUserId: string;
+  toUserId: string;
+  amount: bigint;
+  settledAt?: string;
+  method?: string;
+  note?: string;
+  transactionReference?: string;
+  /** Effect on this member's balance: positive when they sent the payment. */
+  effect: bigint;
+};
+
 export type MemberBalance = {
   userId: string;
   name: string;
   paid: bigint;
   share: bigint;
+  settlementsSent: bigint;
+  settlementsReceived: bigint;
   net: bigint;
   status: BalanceStatus;
   entries: BalanceEntry[];
+  settlementEntries: BalanceSettlementEntry[];
 };
 
 export type GroupBalance = {
@@ -73,6 +101,7 @@ export class BalanceCalculationError extends Error {
 export function calculateGroupBalances(
   members: readonly BalanceMember[],
   expenses: readonly BalanceExpense[],
+  settlements: readonly BalanceSettlement[] = [],
 ): GroupBalance {
   if (!Array.isArray(members)) {
     throw new BalanceCalculationError("Members must be an array");
@@ -82,10 +111,17 @@ export function calculateGroupBalances(
     throw new BalanceCalculationError("Expenses must be an array");
   }
 
+  if (!Array.isArray(settlements)) {
+    throw new BalanceCalculationError("Settlements must be an array");
+  }
+
   const memberMap = new Map<string, BalanceMember>();
   const paidByUser = new Map<string, bigint>();
   const shareByUser = new Map<string, bigint>();
+  const sentByUser = new Map<string, bigint>();
+  const receivedByUser = new Map<string, bigint>();
   const entriesByUser = new Map<string, BalanceEntry[]>();
+  const settlementEntriesByUser = new Map<string, BalanceSettlementEntry[]>();
 
   for (const member of members) {
     assertNonEmptyString(member.userId, "Member id");
@@ -100,7 +136,10 @@ export function calculateGroupBalances(
     memberMap.set(member.userId, member);
     paidByUser.set(member.userId, 0n);
     shareByUser.set(member.userId, 0n);
+    sentByUser.set(member.userId, 0n);
+    receivedByUser.set(member.userId, 0n);
     entriesByUser.set(member.userId, []);
+    settlementEntriesByUser.set(member.userId, []);
   }
 
   const seenExpenseIds = new Set<string>();
@@ -211,19 +250,95 @@ export function calculateGroupBalances(
     }
   }
 
+  const seenSettlementIds = new Set<string>();
+
+  for (const settlement of settlements) {
+    assertNonEmptyString(settlement.id, "Settlement id");
+
+    if (seenSettlementIds.has(settlement.id)) {
+      throw new BalanceCalculationError(
+        `Duplicate settlement id: "${settlement.id}"`,
+      );
+    }
+    seenSettlementIds.add(settlement.id);
+
+    assertBigInt(settlement.amount, `Settlement "${settlement.id}" amount`);
+
+    if (settlement.amount <= 0n) {
+      throw new BalanceCalculationError(
+        `Settlement "${settlement.id}" amount must be greater than zero`,
+      );
+    }
+
+    if (!memberMap.has(settlement.fromUserId)) {
+      throw new BalanceCalculationError(
+        `Settlement "${settlement.id}" has a sender who is not a group member`,
+      );
+    }
+
+    if (!memberMap.has(settlement.toUserId)) {
+      throw new BalanceCalculationError(
+        `Settlement "${settlement.id}" has a receiver who is not a group member`,
+      );
+    }
+
+    if (settlement.fromUserId === settlement.toUserId) {
+      throw new BalanceCalculationError(
+        `Settlement "${settlement.id}" must have two different members`,
+      );
+    }
+
+    sentByUser.set(
+      settlement.fromUserId,
+      (sentByUser.get(settlement.fromUserId) ?? 0n) + settlement.amount,
+    );
+    receivedByUser.set(
+      settlement.toUserId,
+      (receivedByUser.get(settlement.toUserId) ?? 0n) + settlement.amount,
+    );
+
+    const senderEntries = settlementEntriesByUser.get(settlement.fromUserId);
+    const receiverEntries = settlementEntriesByUser.get(settlement.toUserId);
+
+    if (!senderEntries || !receiverEntries) {
+      throw new BalanceCalculationError(
+        `Cannot record settlement "${settlement.id}" for an unknown member`,
+      );
+    }
+
+    const baseEntry = {
+      settlementId: settlement.id,
+      fromUserId: settlement.fromUserId,
+      toUserId: settlement.toUserId,
+      amount: settlement.amount,
+      settledAt: settlement.settledAt,
+      method: settlement.method,
+      note: settlement.note,
+      transactionReference: settlement.transactionReference,
+    };
+
+    senderEntries.push({ ...baseEntry, effect: settlement.amount });
+    receiverEntries.push({ ...baseEntry, effect: 0n - settlement.amount });
+  }
+
   const balances: MemberBalance[] = members.map((member) => {
     const paid = paidByUser.get(member.userId) ?? 0n;
     const share = shareByUser.get(member.userId) ?? 0n;
-    const net = paid - share;
+    const settlementsSent = sentByUser.get(member.userId) ?? 0n;
+    const settlementsReceived = receivedByUser.get(member.userId) ?? 0n;
+    const net = paid - share + settlementsSent - settlementsReceived;
 
     return {
       userId: member.userId,
       name: member.name,
       paid,
       share,
+      settlementsSent,
+      settlementsReceived,
       net,
       status: net > 0n ? "owed" : net < 0n ? "owes" : "settled",
       entries: entriesByUser.get(member.userId) ?? [],
+      settlementEntries: settlementEntriesByUser.get(member.userId) ?? [],
     };
   });
 

@@ -11,6 +11,9 @@ const prismaMock = vi.hoisted(() => ({
   expense: {
     findMany: vi.fn(),
   },
+  settlement: {
+    findMany: vi.fn(),
+  },
 }));
 
 const sessionMock = vi.hoisted(() => ({
@@ -46,6 +49,7 @@ function membership(
 beforeEach(() => {
   vi.clearAllMocks();
   sessionMock.requireUser.mockResolvedValue({ id: USER_ID });
+  prismaMock.settlement.findMany.mockResolvedValue([]);
 });
 
 describe("getGroupBalances", () => {
@@ -59,6 +63,7 @@ describe("getGroupBalances", () => {
     expect(sessionMock.requireUser).toHaveBeenCalledOnce();
     expect(prismaMock.groupMember.findMany).not.toHaveBeenCalled();
     expect(prismaMock.expense.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.settlement.findMany).not.toHaveBeenCalled();
   });
 
   it("returns serialized balances for this group only", async () => {
@@ -129,6 +134,105 @@ describe("getGroupBalances", () => {
         orderBy: [{ expenseDate: "desc" }, { createdAt: "desc" }],
       }),
     );
+  });
+
+  it("includes settlements in serialized member balances and breakdowns", async () => {
+    currentUserIsMember();
+    prismaMock.groupMember.findMany.mockResolvedValue([
+      membership("rafi"),
+      membership("nusrat"),
+    ]);
+    prismaMock.expense.findMany.mockResolvedValue([
+      {
+        id: "dinner",
+        description: "Dinner",
+        amount: 30_000n,
+        expenseDate: new Date(Date.UTC(2026, 10, 3)),
+        paidById: "rafi",
+        participants: [{ userId: "nusrat", shareAmount: 30_000n }],
+      },
+    ]);
+    prismaMock.settlement.findMany.mockResolvedValue([
+      {
+        id: "settlement-1",
+        fromUserId: "nusrat",
+        toUserId: "rafi",
+        amount: 10_000n,
+        method: "BKASH",
+        transactionReference: "TRX123",
+        note: "Partial payment",
+        settledAt: new Date(Date.UTC(2026, 10, 4, 12, 30)),
+      },
+    ]);
+
+    const result = await getGroupBalances(GROUP_ID);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.data.members[0]).toMatchObject({
+      userId: "rafi",
+      net: "200.00",
+      settlementsSent: "0.00",
+      settlementsReceived: "100.00",
+    });
+    expect(result.data.members[0].settlementEntries[0]).toMatchObject({
+      settlementId: "settlement-1",
+      fromName: "NUSRAT",
+      toName: "RAFI",
+      amount: "100.00",
+      effect: "-100.00",
+      method: "BKASH",
+      transactionReference: "TRX123",
+    });
+    expect(result.data.members[1]).toMatchObject({
+      userId: "nusrat",
+      net: "-200.00",
+      settlementsSent: "100.00",
+      settlementsReceived: "0.00",
+    });
+    expect(result.data.members[1].settlementEntries[0]).toMatchObject({
+      effect: "100.00",
+    });
+
+    expect(prismaMock.settlement.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { groupId: GROUP_ID } }),
+    );
+  });
+
+  it("keeps a former member whose only activity is a settlement", async () => {
+    currentUserIsMember();
+    prismaMock.groupMember.findMany.mockResolvedValue([
+      membership("active"),
+      membership("former", {
+        leftAt: new Date(Date.UTC(2026, 5, 1)),
+      }),
+    ]);
+    prismaMock.expense.findMany.mockResolvedValue([]);
+    prismaMock.settlement.findMany.mockResolvedValue([
+      {
+        id: "settlement-former",
+        fromUserId: "former",
+        toUserId: "active",
+        amount: 5_000n,
+        method: "CASH",
+        transactionReference: null,
+        note: null,
+        settledAt: new Date(Date.UTC(2026, 10, 4)),
+      },
+    ]);
+
+    const result = await getGroupBalances(GROUP_ID);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.data.members).toHaveLength(2);
+    expect(result.data.members[1]).toMatchObject({
+      userId: "former",
+      isActive: false,
+      net: "50.00",
+    });
   });
 
   it("keeps former members who have activity, but omits inactive members with none", async () => {
@@ -244,7 +348,7 @@ describe("getGroupBalances", () => {
       expect(result).toEqual({
         ok: false,
         error:
-          "Balances could not be calculated because the group's expense data is inconsistent.",
+          "Balances could not be calculated because the group's ledger is inconsistent.",
       });
       expect(errorSpy).toHaveBeenCalled();
     } finally {

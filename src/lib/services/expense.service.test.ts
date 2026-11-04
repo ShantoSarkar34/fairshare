@@ -26,6 +26,11 @@ const prismaMock = vi.hoisted(() => ({
     deleteMany: vi.fn(),
     createMany: vi.fn(),
   },
+  settlement: {
+    delete: vi.fn(),
+    deleteMany: vi.fn(),
+    updateMany: vi.fn(),
+  },
   $transaction: vi.fn(),
 }));
 
@@ -366,6 +371,10 @@ describe("updateExpense", () => {
     expect(prismaMock.expenseParticipant.deleteMany).toHaveBeenCalledWith({
       where: { expenseId: EXPENSE_ID },
     });
+    // An expense edit must not erase independent settlement records.
+    expect(prismaMock.settlement.delete).not.toHaveBeenCalled();
+    expect(prismaMock.settlement.deleteMany).not.toHaveBeenCalled();
+    expect(prismaMock.settlement.updateMany).not.toHaveBeenCalled();
 
     const createManyCall = prismaMock.expenseParticipant.createMany.mock
       .calls[0]?.[0] as {
@@ -454,6 +463,10 @@ describe("deleteExpense", () => {
     expect(prismaMock.expense.delete).toHaveBeenCalledWith({
       where: { id: EXPENSE_ID },
     });
+    // Settlements are historical records and are independent of expenses.
+    expect(prismaMock.settlement.delete).not.toHaveBeenCalled();
+    expect(prismaMock.settlement.deleteMany).not.toHaveBeenCalled();
+    expect(prismaMock.settlement.updateMany).not.toHaveBeenCalled();
   });
 
   it("lets a group admin delete another member's expense", async () => {

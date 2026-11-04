@@ -16,6 +16,8 @@ import { NotFoundError } from "@/lib/errors";
 import { formatExpenseDate } from "@/lib/expenses/display";
 import { formatPoisha, parseMoneyToPoisha } from "@/lib/money";
 import { getGroupBalances } from "@/lib/services/balance.service";
+import { SETTLEMENT_METHOD_LABELS } from "@/lib/settlements/display";
+import type { SettlementMethod } from "@/lib/settlements/types";
 
 export async function BalanceSection({ groupId }: { groupId: string }) {
   const result = await getGroupBalances(groupId).catch((error: unknown) => {
@@ -149,6 +151,8 @@ function MemberBalanceRow({
 }) {
   const paid = parseMoneyToPoisha(member.paid);
   const share = parseMoneyToPoisha(member.share);
+  const settlementsSent = parseMoneyToPoisha(member.settlementsSent);
+  const settlementsReceived = parseMoneyToPoisha(member.settlementsReceived);
   const net = parseMoneyToPoisha(member.net);
 
   return (
@@ -172,6 +176,10 @@ function MemberBalanceRow({
             <p className="mt-1 text-xs text-muted-foreground">
               Paid {formatPoisha(paid)} · Share {formatPoisha(share)}
             </p>
+            <p className="text-xs text-muted-foreground">
+              Settlements sent {formatPoisha(settlementsSent)} · received{" "}
+              {formatPoisha(settlementsReceived)}
+            </p>
           </div>
         </div>
 
@@ -191,50 +199,106 @@ function MemberBalanceRow({
         <summary className="cursor-pointer text-xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
           Calculation breakdown
         </summary>
-        <div className="mt-2 space-y-3 rounded-lg bg-muted/40 p-3">
-          {member.entries.length === 0 ? (
-            <p className="text-xs text-muted-foreground">
-              No expenses involve this member yet.
-            </p>
-          ) : (
-            <ul className="space-y-3">
-              {member.entries.map((entry) => {
-                const entryEffect = parseMoneyToPoisha(entry.effect);
+        <div className="mt-2 space-y-4 rounded-lg bg-muted/40 p-3">
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-foreground">Expenses</p>
+            {member.entries.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                No expenses involve this member yet.
+              </p>
+            ) : (
+              <ul className="space-y-3">
+                {member.entries.map((entry) => {
+                  const entryEffect = parseMoneyToPoisha(entry.effect);
 
-                return (
-                  <li
-                    key={entry.expenseId}
-                    className="space-y-1 border-t border-border/60 pt-3 first:border-0 first:pt-0"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="truncate text-xs font-medium text-foreground">
-                          {entry.description}
-                        </p>
-                        {entry.expenseDate && (
-                          <p className="text-xs text-muted-foreground">
-                            {formatExpenseDate(entry.expenseDate)}
+                  return (
+                    <li
+                      key={entry.expenseId}
+                      className="space-y-1 border-t border-border/60 pt-3 first:border-0 first:pt-0"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-xs font-medium text-foreground">
+                            {entry.description}
                           </p>
-                        )}
+                          {entry.expenseDate && (
+                            <p className="text-xs text-muted-foreground">
+                              {formatExpenseDate(entry.expenseDate)}
+                            </p>
+                          )}
+                        </div>
+                        <p
+                          className={`shrink-0 font-mono text-xs font-medium ${netToneClass(entryEffect)}`}
+                        >
+                          {formatSignedPoisha(entryEffect)}
+                        </p>
                       </div>
-                      <p
-                        className={`shrink-0 font-mono text-xs font-medium ${netToneClass(entryEffect)}`}
-                      >
-                        {formatSignedPoisha(entryEffect)}
+                      <p className="text-xs text-muted-foreground">
+                        Paid {formatPoisha(parseMoneyToPoisha(entry.paid))} ·
+                        Share {formatPoisha(parseMoneyToPoisha(entry.share))}
                       </p>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      Paid {formatPoisha(parseMoneyToPoisha(entry.paid))} ·
-                      Share {formatPoisha(parseMoneyToPoisha(entry.share))}
-                    </p>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+
+          <div className="space-y-2 border-t border-border/60 pt-3">
+            <p className="text-xs font-semibold text-foreground">Settlements</p>
+            {member.settlementEntries.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                No settlements involve this member yet.
+              </p>
+            ) : (
+              <ul className="space-y-3">
+                {member.settlementEntries.map((entry) => {
+                  const entryEffect = parseMoneyToPoisha(entry.effect);
+                  const sent = entry.fromUserId === member.userId;
+                  const method = formatSettlementMethod(entry.method);
+
+                  return (
+                    <li
+                      key={entry.settlementId}
+                      className="space-y-1 border-t border-border/60 pt-3 first:border-0 first:pt-0"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-xs font-medium text-foreground">
+                            {sent
+                              ? `Sent to ${entry.toName}`
+                              : `Received from ${entry.fromName}`}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {entry.settledAtLabel ?? "Recorded settlement"}
+                            {method ? ` · ${method}` : ""}
+                          </p>
+                          {entry.transactionReference && (
+                            <p className="truncate text-xs text-muted-foreground">
+                              Ref: {entry.transactionReference}
+                            </p>
+                          )}
+                        </div>
+                        <p
+                          className={`shrink-0 font-mono text-xs font-medium ${netToneClass(entryEffect)}`}
+                        >
+                          {formatSignedPoisha(entryEffect)}
+                        </p>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Amount {formatPoisha(parseMoneyToPoisha(entry.amount))}
+                      </p>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
 
           <div className="border-t border-border/60 pt-2 text-xs font-medium">
-            Paid {formatPoisha(paid)} − Share {formatPoisha(share)} ={" "}
+            Paid {formatPoisha(paid)} − Share {formatPoisha(share)} + Sent{" "}
+            {formatPoisha(settlementsSent)} − Received{" "}
+            {formatPoisha(settlementsReceived)} ={" "}
             <span className={netToneClass(net)}>
               {formatSignedPoisha(net)}
             </span>
@@ -284,4 +348,9 @@ function netToneClass(net: bigint): string {
 
 function formatSignedPoisha(amount: bigint): string {
   return amount > 0n ? `+${formatPoisha(amount)}` : formatPoisha(amount);
+}
+
+function formatSettlementMethod(method: string | undefined): string | null {
+  if (!method) return null;
+  return SETTLEMENT_METHOD_LABELS[method as SettlementMethod] ?? method;
 }

@@ -29,6 +29,15 @@ enum PaymentMethod {
   BANK
 }
 
+enum BkashPaymentStatus {
+  PENDING
+  INITIATED
+  COMPLETED
+  FAILED
+  CANCELLED
+  UNKNOWN
+}
+
 enum ActivityType {
   GROUP_CREATED
   MEMBER_JOINED
@@ -67,6 +76,7 @@ model User {
   settlementsPaid     Settlement[]         @relation("SettlementFrom")
   settlementsReceived Settlement[]         @relation("SettlementTo")
   settlementsRecorded Settlement[]         @relation("SettlementRecorder")
+  bkashPayments       BkashPayment[]
   activities          Activity[]
 
   @@unique([email])
@@ -131,11 +141,12 @@ model Group {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  members     GroupMember[]
-  invites     GroupInvite[]
-  expenses    Expense[]
-  settlements Settlement[]
-  activities  Activity[]
+  members       GroupMember[]
+  invites       GroupInvite[]
+  expenses      Expense[]
+  settlements   Settlement[]
+  bkashPayments BkashPayment[]
+  activities    Activity[]
 
   @@index([createdById])
   @@map("groups")
@@ -216,26 +227,59 @@ model ExpenseParticipant {
 }
 
 model Settlement {
-  id          String        @id @default(cuid())
-  groupId     String
-  group       Group         @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  fromUserId  String
-  fromUser    User          @relation("SettlementFrom", fields: [fromUserId], references: [id], onDelete: Restrict)
-  toUserId    String
-  toUser      User          @relation("SettlementTo", fields: [toUserId], references: [id], onDelete: Restrict)
+  id                   String        @id @default(cuid())
+  groupId              String
+  group                Group         @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  fromUserId           String
+  fromUser             User          @relation("SettlementFrom", fields: [fromUserId], references: [id], onDelete: Restrict)
+  toUserId             String
+  toUser               User          @relation("SettlementTo", fields: [toUserId], references: [id], onDelete: Restrict)
   // Integer poisha.
-  amount      BigInt
-  method      PaymentMethod
-  note        String?
-  settledAt   DateTime      @default(now())
-  createdById String
-  createdBy   User          @relation("SettlementRecorder", fields: [createdById], references: [id], onDelete: Restrict)
-  createdAt   DateTime      @default(now())
+  amount               BigInt
+  method               PaymentMethod
+  // Optional external payment reference (for example a bKash transaction id
+  // typed in by the member). FairShare does not verify manual transfers.
+  transactionReference String?
+  note                 String?
+  settledAt            DateTime      @default(now())
+  createdById          String
+  createdBy            User          @relation("SettlementRecorder", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @default(now()) @updatedAt
 
   @@index([groupId, settledAt])
   @@index([fromUserId])
   @@index([toUserId])
   @@map("settlements")
+}
+
+// A sandbox merchant checkout is deliberately separate from Settlement.
+// Completing this checkout never transfers money to another group member and
+// never changes a member-to-member balance.
+model BkashPayment {
+  id                    String             @id @default(cuid())
+  groupId               String
+  group                 Group              @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId                String
+  user                  User               @relation(fields: [userId], references: [id], onDelete: Restrict)
+  // Integer poisha.
+  amount                BigInt
+  currency              String             @default("BDT")
+  merchantInvoiceNumber String             @unique
+  paymentID             String?            @unique
+  trxID                 String?            @unique
+  status                BkashPaymentStatus @default(PENDING)
+  payerReference        String?
+  // Safe, non-sensitive failure text only. Never store tokens, PINs or OTPs.
+  failureReason         String?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+  completedAt           DateTime?
+
+  @@index([groupId, createdAt])
+  @@index([userId, createdAt])
+  @@index([status])
+  @@map("bkash_payments")
 }
 
 model Activity {

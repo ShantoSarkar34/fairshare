@@ -4,12 +4,20 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import {
+  BkashSandboxSection,
+  BkashSandboxSectionSkeleton,
+} from "@/components/bkash/bkash-sandbox-section";
+import {
   BalanceSection,
   BalanceSectionSkeleton,
 } from "@/components/groups/balance-section";
 import { DeleteGroupSection } from "@/components/groups/delete-group-section";
 import { InvitePanel } from "@/components/groups/invite-panel";
 import { RemoveMemberButton } from "@/components/groups/remove-member-button";
+import {
+  SettlementSection,
+  SettlementSectionSkeleton,
+} from "@/components/settlements/settlement-section";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import {
@@ -77,6 +85,14 @@ export default async function GroupPage({
 
       <Suspense fallback={<BalanceSectionSkeleton />}>
         <BalanceSection groupId={group.id} />
+      </Suspense>
+
+      <Suspense fallback={<SettlementSectionSkeleton />}>
+        <SettlementSection groupId={group.id} />
+      </Suspense>
+
+      <Suspense fallback={<BkashSandboxSectionSkeleton />}>
+        <BkashSandboxSection groupId={group.id} />
       </Suspense>
 
       <Card>
