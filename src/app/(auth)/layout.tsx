@@ -4,6 +4,10 @@ import { Brand } from "@/components/layout/brand";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { getSession } from "@/lib/auth/session";
 
+// The session check and each auth page's `searchParams` are request-time data.
+// Opt these routes out of the static shell so they can block on that data.
+export const instant = false;
+
 export default async function AuthLayout({
   children,
 }: {

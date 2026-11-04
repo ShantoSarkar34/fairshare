@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "postinstall": "prisma generate",
     "start": "next start",
+    "db:deploy": "prisma migrate deploy",
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest"

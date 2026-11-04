@@ -7,8 +7,8 @@ import {
   reconcileBkashPayment,
 } from "@/lib/services/bkash-payment.service";
 
-export const dynamic = "force-dynamic";
-
+// Route Handlers that read the request/session are dynamic under Cache
+// Components; an explicit `dynamic = "force-dynamic"` is rejected by Next 16.
 const paymentIdSchema = z.string().trim().min(1).max(200);
 
 function callbackStatusFrom(value: string | null): "success" | "failure" | "cancel" | undefined {

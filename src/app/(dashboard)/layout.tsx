@@ -5,6 +5,10 @@ import { MainNav } from "@/components/layout/main-nav";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { requireUser } from "@/lib/auth/session";
 
+// Every dashboard route depends on the authenticated session and request data.
+// Opt the whole authenticated shell out of the static prerender shell.
+export const instant = false;
+
 export default async function DashboardLayout({
   children,
 }: {
